@@ -1,0 +1,249 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    html, body { margin:0; height:100%; overflow:hidden; background:#0E0F13; }
+    canvas { position:fixed; inset:0; z-index:1; display:block; }
+  </style>
+</head>
+<body>
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js";
+import { EffectComposer } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/postprocessing/OutputPass.js";
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color("#0E0F13");
+
+const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 100);
+camera.position.z = 7;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const clock = new THREE.Clock();
+
+const orbUniforms = {
+  uTime: { value: 0 },
+  uVoiceBright: { value: 0.0 },
+  uColor: { value: new THREE.Color("#2DD4A8") }
+};
+
+window.setVoiceBright = v => {
+  orbUniforms.uVoiceBright.value = THREE.MathUtils.clamp(v, 0, 1);
+};
+
+const makeGlow = (size, opacity, power) => new THREE.Mesh(
+  new THREE.SphereGeometry(size, 96, 96),
+  new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: orbUniforms,
+    vertexShader: `
+      varying vec3 vNormal;
+      void main() {
+        vNormal = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uVoiceBright;
+      uniform vec3 uColor;
+      varying vec3 vNormal;
+
+      void main() {
+        float idle = 0.5 + 0.5 * sin(uTime * 1.57);
+        float rim = pow(1.0 - abs(vNormal.z), ${power.toFixed(1)});
+        float voice = 1.0 + uVoiceBright * 2.4;
+        float alpha = rim * ${opacity.toFixed(2)} * (0.75 + idle * 0.25) * voice;
+        gl_FragColor = vec4(uColor, alpha);
+      }
+    `
+  })
+);
+
+scene.add(makeGlow(2.35, 0.12, 2.0)); // wide atmospheric bloom
+scene.add(makeGlow(1.55, 0.22, 2.8)); // medium halo
+
+const core = new THREE.Mesh(
+  new THREE.SphereGeometry(0.9, 128, 128),
+  new THREE.ShaderMaterial({
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    uniforms: orbUniforms,
+    vertexShader: `
+      varying vec3 vNormal;
+      varying vec3 vPos;
+      void main() {
+        vNormal = normalize(normalMatrix * normal);
+        vPos = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uVoiceBright;
+      uniform vec3 uColor;
+      varying vec3 vNormal;
+      varying vec3 vPos;
+
+      void main() {
+        float idle = 0.5 + 0.5 * sin(uTime * 1.57);
+        float fresnel = pow(1.0 - max(dot(vNormal, vec3(0.0,0.0,1.0)), 0.0), 2.0);
+        float plasma = sin(vPos.x * 8.0 + uTime) * sin(vPos.y * 7.0 - uTime * 0.8) * 0.08;
+        float intensity = 1.25 + idle * 0.25 + uVoiceBright * 2.2 + plasma;
+        vec3 color = uColor * intensity + vec3(0.05, 0.35, 0.28);
+        gl_FragColor = vec4(color, 0.82 + fresnel * 0.18);
+      }
+    `
+  })
+);
+scene.add(core);
+
+const nebulaUniforms = {
+  uTime: { value: 0 },
+  uResolution: { value: new THREE.Vector2(innerWidth, innerHeight) }
+};
+
+const nebula = new THREE.Mesh(
+  new THREE.PlaneGeometry(24, 14),
+  new THREE.ShaderMaterial({
+    depthWrite: false,
+    depthTest: false,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    uniforms: nebulaUniforms,
+    vertexShader: `void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+    fragmentShader: `
+      uniform float uTime;
+      uniform vec2 uResolution;
+
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+      float noise(vec2 p){
+        vec2 i=floor(p), f=fract(p);
+        f=f*f*(3.0-2.0*f);
+        return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);
+      }
+      float fbm(vec2 p){
+        float v=0.0, a=0.5;
+        for(int i=0;i<5;i++){ v+=a*noise(p); p*=2.0; a*=0.5; }
+        return v;
+      }
+
+      void main(){
+        vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution) / uResolution.y;
+        float t = uTime * 0.035;
+
+        float n1 = fbm(uv * 2.2 + vec2(t, -t));
+        float n2 = fbm(uv * 3.8 + vec2(-t * 1.4, t * 0.7));
+
+        float cloud = smoothstep(0.42, 0.92, n1 + n2 * 0.55);
+        float vignette = smoothstep(1.05, 0.05, length(uv));
+
+        vec3 teal = vec3(0.05, 0.85, 0.70);
+        vec3 purple = vec3(0.55, 0.18, 0.95);
+        vec3 blue = vec3(0.08, 0.28, 0.95);
+
+        vec3 color = mix(teal, purple, n1);
+        color = mix(color, blue, n2 * 0.6);
+
+        gl_FragColor = vec4(color, cloud * vignette * 0.18);
+      }
+    `
+  })
+);
+nebula.position.z = -8;
+scene.add(nebula);
+
+const starCount = 1800;
+const positions = new Float32Array(starCount * 3);
+const sizes = new Float32Array(starCount);
+
+for (let i = 0; i < starCount; i++) {
+  positions[i * 3 + 0] = (Math.random() - 0.5) * 22;
+  positions[i * 3 + 1] = (Math.random() - 0.5) * 13;
+  positions[i * 3 + 2] = -6 - Math.random() * 8;
+  sizes[i] = Math.random() * 2 + 0.5;
+}
+
+const starsGeo = new THREE.BufferGeometry();
+starsGeo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+starsGeo.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
+
+const stars = new THREE.Points(
+  starsGeo,
+  new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    uniforms: { uTime: { value: 0 } },
+    vertexShader: `
+      attribute float aSize;
+      varying float vTwinkle;
+      uniform float uTime;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vTwinkle = 0.55 + 0.45 * sin(uTime * 2.0 + position.x * 8.0 + position.y * 5.0);
+        gl_PointSize = aSize * vTwinkle * 1.4;
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      varying float vTwinkle;
+      void main() {
+        vec2 uv = gl_PointCoord - 0.5;
+        float d = length(uv);
+        float a = smoothstep(0.5, 0.0, d);
+        gl_FragColor = vec4(vec3(0.75, 0.95, 1.0), a * vTwinkle * 0.75);
+      }
+    `
+  })
+);
+scene.add(stars);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+composer.addPass(new UnrealBloomPass(
+  new THREE.Vector2(innerWidth, innerHeight),
+  1.8,
+  0.75,
+  0.08
+));
+composer.addPass(new OutputPass());
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const t = clock.getElapsedTime();
+  orbUniforms.uTime.value = t;
+  nebulaUniforms.uTime.value = t;
+  stars.material.uniforms.uTime.value = t;
+
+  nebula.rotation.z = Math.sin(t * 0.025) * 0.03;
+  stars.rotation.z = t * 0.003;
+
+  composer.render();
+}
+
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+
+  renderer.setSize(innerWidth, innerHeight);
+  composer.setSize(innerWidth, innerHeight);
+  nebulaUniforms.uResolution.value.set(innerWidth, innerHeight);
+});
+
+animate();
+</script>
+</body>
+</html>
