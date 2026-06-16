@@ -10,12 +10,11 @@
 </head>
 <body>
 <script type="module">
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js";
-import { EffectComposer } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/postprocessing/EffectComposer.js";
-import { RenderPass } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/postprocessing/RenderPass.js";
-import { UnrealBloomPass } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { OutputPass } from "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/postprocessing/OutputPass.js";
-
+import * as THREE from "https://esm.sh/three@0.184.0";
+import { EffectComposer } from "https://esm.sh/three@0.184.0/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "https://esm.sh/three@0.184.0/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "https://esm.sh/three@0.184.0/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "https://esm.sh/three@0.184.0/examples/jsm/postprocessing/OutputPass.js";
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#0E0F13");
 
